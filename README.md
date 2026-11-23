@@ -7,6 +7,8 @@ API Spring Boot com:
 - consulta de CEP (`/cep/{cep}`) com **Adapter** (ViaCEP ou BrasilAPI) e **Proxy** (validação, cache e log);
 - **nova funcionalidade: financeiro** (`/lancamentos`), contas a pagar e a receber com baixa, estorno, cancelamento e resumo, usando os padrões comportamentais **State** e **Strategy**. É a mesma área que está sendo desenvolvida no Sputnik (gestão de oficinas).
 
+> **Em desenvolvimento:** o módulo financeiro ainda está sendo construído no Sputnik. Esta versão cobre o núcleo (lançamentos, baixa com regras de pagamento, estorno, cancelamento e resumo) e pode mudar conforme o módulo evoluir.
+
 ## Como executar
 
 Pré-requisitos: JDK 17+ e Maven 3.9+.
