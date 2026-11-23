@@ -6,7 +6,10 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
 
-/** Incentivo: pago até o vencimento, 5% de desconto. Depois do vencimento, valor cheio sem encargos. */
+/**
+ * STRATEGY: pagou até o vencimento, ganha 5% de desconto.
+ * Exemplo: R$ 500 pagos em dia = R$ 475. Depois do vencimento, valor cheio.
+ */
 @Component
 public class DescontoPontualidade implements RegraPagamento {
     static final BigDecimal DESCONTO = new BigDecimal("0.05");

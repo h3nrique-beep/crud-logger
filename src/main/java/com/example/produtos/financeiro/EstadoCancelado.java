@@ -1,5 +1,8 @@
 package com.example.produtos.financeiro;
 
-/** Cancelado: estado final, nenhuma operação é aceita (herda as negações da interface). */
+/**
+ * STATE: lançamento cancelado, estado final.
+ * Não pode nada: a classe fica vazia porque a interface já proíbe tudo.
+ */
 class EstadoCancelado implements EstadoLancamento {
 }

@@ -7,9 +7,8 @@ import java.math.RoundingMode;
 import java.time.LocalDate;
 
 /**
- * Conta a pagar (DESPESA) ou a receber (RECEITA). As mudanças de status são
- * delegadas ao objeto de estado (padrão State); a regra de pagamento escolhida
- * na criação (padrão Strategy) define o ajuste aplicado na baixa.
+ * Uma conta a pagar ou a receber (tabela no banco).
+ * Esta classe não decide o que é permitido: ela pergunta ao estado atual (padrão State).
  */
 @Entity
 public class LancamentoFinanceiro {
@@ -43,6 +42,7 @@ public class LancamentoFinanceiro {
         this.regraPagamento = regraPagamento;
     }
 
+    // STATE em ação: a decisão é do estado atual, sem nenhum if.
     public void baixar(LocalDate pagamentoEm, BigDecimal ajuste) { status.estado().baixar(this, pagamentoEm, ajuste); }
     public void estornar() { status.estado().estornar(this); }
     public void cancelar() { status.estado().cancelar(this); }
@@ -65,6 +65,7 @@ public class LancamentoFinanceiro {
         this.valorPago = null;
     }
 
+    // Só leitura: não há setters públicos, então ninguém muda o status por fora.
     public Long getId() { return id; }
     public TipoLancamento getTipo() { return tipo; }
     public String getDescricao() { return descricao; }

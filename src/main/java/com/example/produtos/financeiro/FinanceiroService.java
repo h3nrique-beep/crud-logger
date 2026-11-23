@@ -16,8 +16,11 @@ import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 /**
- * Regras do financeiro: valida o lançamento, escolhe a regra de pagamento (Strategy)
- * e aplica as transições de estado (State), registrando tudo no AppLogger.
+ * Coração do financeiro: aqui ficam as regras de negócio.
+ * 1. Confere os dados do lançamento.
+ * 2. Usa a Strategy para calcular multa, juros ou desconto.
+ * 3. Usa o State para saber se a operação é permitida.
+ * 4. Registra cada passo no AppLogger (Singleton).
  */
 @Service
 public class FinanceiroService {
@@ -25,6 +28,8 @@ public class FinanceiroService {
     private final Map<String, RegraPagamento> regras;
     private final AppLogger log = AppLogger.getInstance();
 
+    // O Spring entrega todas as regras (Strategy); guardamos num mapa pelo nome.
+    // Inversão de Dependência: conhecemos a interface, não as classes concretas.
     public FinanceiroService(LancamentoRepository repo, List<RegraPagamento> regras) {
         this.repo = repo;
         this.regras = regras.stream().collect(Collectors.toMap(RegraPagamento::tipo, Function.identity()));
@@ -34,6 +39,7 @@ public class FinanceiroService {
     public LancamentoFinanceiro criar(NovoLancamento req) {
         log.debug("criar lançamento tipo=" + req.tipo() + " valor=" + req.valor() + " vencimento=" + req.vencimento()
                 + " regra=" + req.regraPagamento());
+        // Passo 1: recusa dados errados (HTTP 400).
         if (req.tipo() == null) throw recusar(HttpStatus.BAD_REQUEST, "tipo obrigatório: use " + List.of(TipoLancamento.values()));
         if (req.descricao() == null || req.descricao().isBlank()) throw recusar(HttpStatus.BAD_REQUEST, "descrição obrigatória");
         if (req.valor() == null || req.valor().signum() <= 0) throw recusar(HttpStatus.BAD_REQUEST, "valor deve ser maior que zero");
@@ -42,6 +48,7 @@ public class FinanceiroService {
         if (!regras.containsKey(regra))
             throw recusar(HttpStatus.BAD_REQUEST, "regraPagamento inválida: " + regra + "; use " + regras.keySet());
 
+        // Passo 2: dados certos, então salva. Todo lançamento nasce PENDENTE.
         String categoria = req.categoria() == null || req.categoria().isBlank() ? "Geral" : req.categoria().trim();
         LancamentoFinanceiro salvo = repo.save(new LancamentoFinanceiro(
                 req.tipo(), req.descricao().trim(), categoria, req.valor(), req.vencimento(), regra));
@@ -67,8 +74,10 @@ public class FinanceiroService {
         LocalDate data = pagamentoEm == null ? LocalDate.now() : pagamentoEm;
         if (data.isAfter(LocalDate.now())) throw recusar(HttpStatus.BAD_REQUEST, "data de pagamento não pode ser futura");
         return transicionar(id, "baixar", l -> {
+            // STRATEGY: pega a regra deste lançamento e calcula o ajuste.
             RegraPagamento regra = regras.get(l.getRegraPagamento());
             BigDecimal ajuste = regra.ajuste(l.getValor(), l.getVencimento(), data);
+            // STATE: só baixa se o estado atual permitir.
             l.baixar(data, ajuste);
             log.info("baixa " + regra.tipo() + " em " + data + ": " + l.getValor() + " ajuste " + ajuste + " = " + l.getValorPago());
         });
@@ -89,12 +98,14 @@ public class FinanceiroService {
         return r;
     }
 
+    // Soma só os lançamentos do tipo e do status pedidos.
     private BigDecimal somar(List<LancamentoFinanceiro> todos, TipoLancamento tipo, StatusLancamento status,
                              Function<LancamentoFinanceiro, BigDecimal> campo) {
         Predicate<LancamentoFinanceiro> filtro = l -> l.getTipo() == tipo && l.getStatus() == status;
         return todos.stream().filter(filtro).map(campo).reduce(BigDecimal.ZERO, BigDecimal::add);
     }
 
+    // Caminho único de baixar, estornar e cancelar: busca, tenta, registra no log e salva.
     private LancamentoFinanceiro transicionar(Long id, String operacao, Consumer<LancamentoFinanceiro> acao) {
         log.debug(operacao + " lançamento id=" + id);
         LancamentoFinanceiro l = buscar(id);
@@ -109,6 +120,7 @@ public class FinanceiroService {
         return repo.save(l);
     }
 
+    // Registra o erro no AppLogger e devolve o HTTP certo com o motivo.
     private ResponseStatusException recusar(HttpStatus status, String motivo) {
         log.erro(motivo);
         return new ResponseStatusException(status, motivo);

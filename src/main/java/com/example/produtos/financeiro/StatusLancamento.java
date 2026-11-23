@@ -1,6 +1,9 @@
 package com.example.produtos.financeiro;
 
-/** O que é gravado no banco; cada status aponta para o objeto de estado que contém o comportamento. */
+/**
+ * Liga o padrão State ao banco: o banco grava só o nome (PENDENTE, PAGO, CANCELADO)
+ * e cada nome aponta para a classe de estado que tem o comportamento.
+ */
 public enum StatusLancamento {
     PENDENTE(new EstadoPendente()),
     PAGO(new EstadoPago()),

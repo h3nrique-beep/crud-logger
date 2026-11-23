@@ -8,7 +8,10 @@ import org.springframework.web.bind.annotation.*;
 import java.time.LocalDate;
 import java.util.List;
 
-/** Só traduz HTTP para chamadas do FinanceiroService; nenhuma regra aqui. */
+/**
+ * Porta de entrada da API: recebe o pedido HTTP e chama o service.
+ * Não tem regra de negócio (Responsabilidade Única do SOLID).
+ */
 @RestController
 @RequestMapping("/lancamentos")
 public class FinanceiroController {

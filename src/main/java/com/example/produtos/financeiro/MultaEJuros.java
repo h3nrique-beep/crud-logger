@@ -7,7 +7,11 @@ import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 
-/** Padrão de boleto: pago com atraso, 2% de multa mais 0,033% ao dia de juros (≈1% ao mês). Em dia, nada. */
+/**
+ * STRATEGY: pagou com atraso, paga mais.
+ * Conta: 2% de multa + 0,033% por dia de atraso. Em dia, não muda nada.
+ * Exemplo: R$ 1.000 com 10 dias de atraso = 20,00 + 3,30 = R$ 1.023,30.
+ */
 @Component
 public class MultaEJuros implements RegraPagamento {
     static final BigDecimal MULTA = new BigDecimal("0.02");

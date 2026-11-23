@@ -4,8 +4,10 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 
 /**
- * State: cada estado do lançamento decide quais operações aceita.
- * Por padrão toda operação é negada; o estado concreto sobrescreve só as que permite.
+ * PADRÃO STATE (interface).
+ * Problema: um lançamento só pode ser baixado, estornado ou cancelado em certos momentos.
+ * Solução: cada estado é uma classe que diz o que aceita, em vez de vários "if (status == ...)".
+ * Aqui tudo é proibido por padrão; cada estado libera só o que pode.
  */
 public interface EstadoLancamento {
 
@@ -15,6 +17,7 @@ public interface EstadoLancamento {
 
     default void cancelar(LancamentoFinanceiro l) { throw negar("cancelar", l); }
 
+    // Monta a mensagem de erro que o usuário vê.
     private static TransicaoInvalidaException negar(String operacao, LancamentoFinanceiro l) {
         return new TransicaoInvalidaException(
                 "não é possível " + operacao + " o lançamento " + l.getId() + " no estado " + l.getStatus());

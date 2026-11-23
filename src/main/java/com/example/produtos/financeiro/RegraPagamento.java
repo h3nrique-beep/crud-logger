@@ -4,9 +4,10 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 
 /**
- * Strategy: como o valor muda conforme a data do pagamento. Cada implementação é um
- * bean Spring; o FinanceiroService recebe todas e escolhe pelo tipo gravado no
- * lançamento, então uma regra nova é só uma classe nova.
+ * PADRÃO STRATEGY (interface).
+ * Problema: na baixa, o valor pode ter multa, desconto ou não mudar.
+ * Solução: cada forma de calcular é uma classe. Para criar uma regra nova, basta criar
+ * uma classe nova; o FinanceiroService não muda (Aberto/Fechado do SOLID).
  */
 public interface RegraPagamento {
     /** Identificador gravado no lançamento (ex.: "MULTA_JUROS"). */

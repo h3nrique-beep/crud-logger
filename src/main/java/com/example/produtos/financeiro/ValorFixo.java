@@ -5,7 +5,7 @@ import org.springframework.stereotype.Component;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 
-/** Sem ajuste: paga o valor original em qualquer data (ex.: acerto interno). */
+/** STRATEGY: paga sempre o valor original, em qualquer data. */
 @Component
 public class ValorFixo implements RegraPagamento {
     @Override
