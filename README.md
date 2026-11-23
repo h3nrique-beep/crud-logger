@@ -1,11 +1,11 @@
-# CRUD Produtos + Logger Singleton + Pedidos com entrega
+# CRUD Produtos + Logger Singleton + Financeiro
 
 API Spring Boot com:
 
 - CRUD de produtos (`/produtos`);
 - `AppLogger` Singleton registrando as operações no console e em `app.log`;
 - consulta de CEP (`/cep/{cep}`) com **Adapter** (ViaCEP ou BrasilAPI) e **Proxy** (validação, cache e log);
-- **nova funcionalidade: pedidos com entrega** (`/pedidos`), usando os padrões comportamentais **State** e **Strategy**.
+- **nova funcionalidade: financeiro** (`/lancamentos`), contas a pagar e a receber com baixa, estorno, cancelamento e resumo, usando os padrões comportamentais **State** e **Strategy**. É a mesma área que está sendo desenvolvida no Sputnik (gestão de oficinas).
 
 ## Como executar
 
@@ -13,134 +13,133 @@ Pré-requisitos: JDK 17+ e Maven 3.9+.
 
 ```bash
 mvn spring-boot:run     # sobe em http://localhost:8080 (H2 em memória)
-mvn test                # testes de estado, frete e o fluxo HTTP completo
+mvn test                # estados, regras de pagamento e o fluxo HTTP completo
 ```
 
 O provedor de CEP é escolhido em `application.properties` (`cep.provedor=viacep` ou `brasilapi`). A consulta real precisa de internet; os testes simulam só o provedor externo.
 
-## Nova funcionalidade: pedidos com entrega
+## Nova funcionalidade: financeiro
 
-**Problema que resolve:** o CRUD só cadastrava produtos. Agora é possível vender um produto, calcular o frete até o CEP do cliente e acompanhar o pedido até a entrega, sem permitir operações fora de ordem (enviar sem pagar, cancelar depois de enviado...).
+**Problema que resolve:** o sistema cadastrava produtos, mas não controlava o dinheiro. Agora registra o que a empresa tem a pagar e a receber, calcula multa, juros ou desconto na hora da baixa e mostra o resumo do caixa, sem permitir operações incoerentes (baixar duas vezes, cancelar algo já pago).
 
 ### Regras de negócio
 
-- Quantidade maior que zero, produto existente e tipo de frete conhecido (senão 400/404).
-- O CEP passa pelo `CepProxy` (8 dígitos, cache) e pelo Adapter configurado; a UF do endereço define o frete.
-- O pedido guarda nome e preço do produto no momento da compra: alterar o preço ou remover o produto no CRUD não muda pedidos antigos.
-- `total = subtotal + frete`, em reais com 2 casas.
+- Lançamento tem tipo (`RECEITA` = a receber, `DESPESA` = a pagar), descrição, valor maior que zero e vencimento. Sem categoria, vira "Geral".
+- Cada lançamento escolhe uma **regra de pagamento**, aplicada na baixa:
+
+| Regra | O que faz |
+| --- | --- |
+| `MULTA_JUROS` | pago com atraso: 2% de multa + 0,033% ao dia de juros (≈1% ao mês); em dia, nada |
+| `DESCONTO_PONTUALIDADE` | pago até o vencimento: 5% de desconto; depois, valor cheio |
+| `VALOR_FIXO` (padrão) | sempre o valor original |
+
+- `valorPago = valor + ajuste` (ajuste negativo é desconto), com 2 casas.
+- A data de pagamento não pode ser futura; sem data, vale hoje.
+- **Vencido** = pendente com vencimento passado. É calculado, não gravado, então muda sozinho com a data.
 - Ciclo de vida:
 
 ```text
-CRIADO --pagar--> PAGO --enviar--> ENVIADO --entregar--> ENTREGUE
-   |                |
-   +--cancelar------+--cancelar--> CANCELADO
+PENDENTE --baixar--> PAGO
+   ^                  |
+   +-----estornar-----+
+PENDENTE --cancelar--> CANCELADO (final)
 ```
 
-  Qualquer outra operação responde **409 Conflict** com o motivo (ex.: `não é possível enviar o pedido 1 no estado CRIADO`).
+  Qualquer outra operação responde **409 Conflict** com o motivo (ex.: `não é possível cancelar o lançamento 1 no estado PAGO`). Para cancelar algo pago, estorne antes.
 
-- Fretes (loja no PR):
-
-| Tipo | Regra |
-| --- | --- |
-| `PADRAO` | grátis a partir de R$ 200; senão R$ 15 no PR e R$ 30 fora |
-| `EXPRESSO` | R$ 30 no PR e R$ 60 fora, + 5% do subtotal (seguro); nunca grátis |
-| `RETIRADA` | R$ 0 (cliente busca na loja) |
+- **Resumo:** a receber e a pagar (pendentes), recebido e pago (com ajustes), saldo realizado e quantidade de vencidos.
 
 ### Endpoints
 
 | Método | Rota | O que faz |
 | --- | --- | --- |
-| POST | `/pedidos` | cria: `{"produtoId":1,"quantidade":3,"cep":"85810000","tipoFrete":"PADRAO"}` |
-| GET | `/pedidos` | lista |
-| GET | `/pedidos/{id}` | detalha |
-| POST | `/pedidos/{id}/pagar` | CRIADO → PAGO |
-| POST | `/pedidos/{id}/enviar` | PAGO → ENVIADO |
-| POST | `/pedidos/{id}/entregar` | ENVIADO → ENTREGUE |
-| POST | `/pedidos/{id}/cancelar` | CRIADO ou PAGO → CANCELADO |
+| POST | `/lancamentos` | cria: `{"tipo":"DESPESA","descricao":"Aluguel","categoria":"Fixas","valor":1000,"vencimento":"2026-11-10","regraPagamento":"MULTA_JUROS"}` |
+| GET | `/lancamentos?status=PENDENTE` | lista (filtro opcional) |
+| GET | `/lancamentos/{id}` | detalha |
+| GET | `/lancamentos/resumo` | indicadores |
+| POST | `/lancamentos/{id}/baixar?data=2026-11-20` | PENDENTE → PAGO, aplicando a regra |
+| POST | `/lancamentos/{id}/estornar` | PAGO → PENDENTE |
+| POST | `/lancamentos/{id}/cancelar` | PENDENTE → CANCELADO |
 
 ### Roteiro de demonstração
 
 ```bash
-curl -X POST localhost:8080/produtos -H "Content-Type: application/json" -d "{\"nome\":\"Caneta\",\"preco\":10}"
-curl -X POST localhost:8080/pedidos -H "Content-Type: application/json" -d "{\"produtoId\":1,\"quantidade\":3,\"cep\":\"85810000\",\"tipoFrete\":\"PADRAO\"}"
-curl -X POST localhost:8080/pedidos/1/enviar     # 409: ainda não foi pago
-curl -X POST localhost:8080/pedidos/1/pagar
-curl -X POST localhost:8080/pedidos/1/enviar
-curl -X POST localhost:8080/pedidos/1/cancelar   # 409: já foi enviado
-curl -X POST localhost:8080/pedidos/1/entregar
+curl -X POST localhost:8080/lancamentos -H "Content-Type: application/json" -d "{\"tipo\":\"DESPESA\",\"descricao\":\"Aluguel\",\"valor\":1000,\"vencimento\":\"2026-11-10\",\"regraPagamento\":\"MULTA_JUROS\"}"
+curl -X POST "localhost:8080/lancamentos/1/baixar?data=2026-11-20"   # 10 dias de atraso: valorPago 1023.30
+curl -X POST localhost:8080/lancamentos/1/baixar                      # 409: já está pago
+curl -X POST localhost:8080/lancamentos/1/cancelar                    # 409: estorne antes
+curl -X POST localhost:8080/lancamentos/1/estornar
+curl -X POST localhost:8080/lancamentos/1/cancelar
+curl localhost:8080/lancamentos/resumo
 ```
 
 Cada passo aparece no `app.log`, por exemplo:
 
 ```text
-[INFO] CEP 85810000 veio do PROVEDOR ViaCepAdapter
-[INFO] frete PADRAO para PR sobre 30.0 = 15.0
-[INFO] pedido criado id=1 total=45.0 status=CRIADO
-[ERRO] não é possível enviar o pedido 1 no estado CRIADO
-[INFO] pedido 1: CRIADO -> PAGO
+[INFO] lançamento criado id=1 DESPESA 1000.00 vence 2026-11-10 regra=MULTA_JUROS
+[INFO] baixa MULTA_JUROS em 2026-11-20: 1000.00 ajuste 23.30 = 1023.30
+[INFO] lançamento 1: PENDENTE -> PAGO
+[ERRO] não é possível baixar o lançamento 1 no estado PAGO
 ```
 
 ## Padrões comportamentais
 
-Código em `src/main/java/com/example/produtos/pedido/`.
+Código em `src/main/java/com/example/produtos/financeiro/`.
 
-### State — ciclo de vida do pedido
+### State: ciclo de vida do lançamento
 
-**Por quê:** sem o padrão, cada operação teria um `if/switch` sobre o status (`if (status == PAGO || status == CRIADO) ...`) espalhado pelo service, e cada status novo obrigaria a mexer em todos eles.
-
-**Como:**
-
-- `EstadoPedido` (interface): `pagar`, `enviar`, `entregar`, `cancelar`. Por padrão todas lançam `TransicaoInvalidaException` (HTTP 409).
-- `EstadoCriado`, `EstadoPago`, `EstadoEnviado`: sobrescrevem só as operações que aceitam e dizem qual o próximo status.
-- `EstadoFinal`: entregue ou cancelado; não aceita nada.
-- `StatusPedido` (enum gravado no banco) liga cada status ao seu objeto de estado.
-- `Pedido.pagar()` apenas delega: `status.estado().pagar(this)`. Só os estados (mesmo pacote) chamam `mudarPara`, então ninguém de fora pula etapas.
-
-### Strategy — cálculo do frete
-
-**Por quê:** o frete muda conforme o tipo de entrega. Com `if (tipo == ...)` no service, cada nova modalidade exigiria alterar uma classe que já funciona.
+**Por quê:** sem o padrão, cada operação teria um `if (status == ...)` no service, e cada status novo obrigaria a revisar todos eles. No Sputnik, por exemplo, a baixa faz `if (status == PAGO) throw`; com estorno e cancelamento isso se multiplica.
 
 **Como:**
 
-- `CalculoFrete` (interface): `tipo()` e `calcular(subtotal, destino)`.
-- `FretePadrao`, `FreteExpresso`, `RetiradaNaLoja`: uma regra por classe, cada uma um `@Component`.
-- O `PedidoService` recebe a `List<CalculoFrete>` do Spring e monta um mapa por `tipo()`. Para criar, por exemplo, "MOTOBOY", basta uma classe nova: o service não muda.
+- `EstadoLancamento` (interface): `baixar`, `estornar` e `cancelar`. Por padrão todas lançam `TransicaoInvalidaException` (HTTP 409).
+- `EstadoPendente` aceita baixar e cancelar; `EstadoPago` aceita estornar; `EstadoCancelado` não aceita nada.
+- `StatusLancamento` (enum gravado no banco) liga cada status ao seu objeto de estado.
+- `LancamentoFinanceiro.baixar()` só delega: `status.estado().baixar(this, ...)`. Os métodos que mudam status e pagamento são visíveis só no pacote, então ninguém de fora pula etapas.
+
+### Strategy: regra de pagamento
+
+**Por quê:** multa e juros, desconto por pontualidade e valor fixo são regras diferentes para a mesma operação (a baixa). Com `if (regra == ...)` no service, cada regra nova alteraria uma classe que já funciona.
+
+**Como:**
+
+- `RegraPagamento` (interface): `tipo()` e `ajuste(valor, vencimento, pagamentoEm)`.
+- `MultaEJuros`, `DescontoPontualidade` e `ValorFixo`: uma regra por classe, cada uma um `@Component`.
+- O `FinanceiroService` recebe a `List<RegraPagamento>` do Spring e monta um mapa por `tipo()`. O lançamento guarda qual regra usa; na baixa, o service busca a regra e passa o ajuste para o estado. Para criar, por exemplo, "PARCELADO", basta uma classe nova: o service não muda.
 
 ### Integração com o que já existia
 
 ```text
-PedidoController ──> PedidoService ──> ConsultaCep (CepProxy, @Primary)
-     (HTTP)         (regras, log)          └─> ViaCepAdapter / BrasilApiAdapter
-                        │
-                        ├─> CalculoFrete (Strategy escolhida pelo tipo)
-                        ├─> Pedido ──> EstadoPedido (State)
-                        └─> PedidoRepository / ProdutoRepository (JPA)
+FinanceiroController ──> FinanceiroService ──> RegraPagamento (Strategy escolhida pelo lançamento)
+      (HTTP)            (regras, AppLogger)  ├─> LancamentoFinanceiro ──> EstadoLancamento (State)
+                                             └─> LancamentoRepository (JPA)
 ```
 
-- **Adapter e Proxy:** o `PedidoService` depende de `ConsultaCep`; recebe o `CepProxy`, que valida, cacheia e delega ao Adapter. O teste confirma que dois pedidos com o mesmo CEP chamam o provedor uma vez só.
-- **Singleton:** service e controller usam `AppLogger.getInstance()` para criação, frete calculado, transições e recusas.
-- **CRUD:** `/produtos` continua igual; o pedido só lê o produto.
+- **Singleton:** service e controller usam `AppLogger.getInstance()` para criação, baixa com o ajuste calculado, transições, recusas e resumo.
+- **CRUD, Adapter e Proxy:** `/produtos` e `/cep/{cep}` não mudaram. O teste `FinanceiroApiTest` prova os dois: cria, lê e remove um produto; consulta o mesmo CEP duas vezes e confirma que o Adapter foi chamado uma vez só (a segunda veio do cache do Proxy); CEP inválido é barrado pelo Proxy.
+- **Camadas:** regras no service e no domínio (estados e regras de pagamento); o controller só traduz HTTP.
 
 ## SOLID aplicado
 
-- **S (Responsabilidade única):** controller só traduz HTTP; service orquestra; cada estado e cada frete tem uma regra só.
-- **O (Aberto/fechado):** novo frete ou novo estado = nova classe, sem alterar `PedidoService`.
-- **L (Substituição de Liskov):** qualquer `CalculoFrete` ou `EstadoPedido` pode ser usado no lugar de outro; qualquer `ConsultaCep` (Proxy ou Adapter) também.
-- **I (Segregação de interfaces):** `CalculoFrete` tem só o necessário para calcular; `ConsultaCep` só busca.
-- **D (Inversão de dependência):** o service depende das interfaces `ConsultaCep` e `CalculoFrete`, injetadas pelo Spring, não de `ViaCepAdapter` ou `FretePadrao`.
+- **S (Responsabilidade única):** controller só HTTP; service orquestra; cada estado e cada regra de pagamento tem uma responsabilidade.
+- **O (Aberto/fechado):** regra de pagamento ou estado novo = classe nova, sem alterar o `FinanceiroService`.
+- **L (Substituição de Liskov):** qualquer `RegraPagamento` ou `EstadoLancamento` pode ser usado no lugar de outro.
+- **I (Segregação de interfaces):** `RegraPagamento` só calcula o ajuste; `EstadoLancamento` só decide transições.
+- **D (Inversão de dependência):** o service depende da interface `RegraPagamento`, injetada pelo Spring, e não de `MultaEJuros`.
 
 ## Melhorias obtidas
 
-- Status inválido vira erro claro (409 com motivo) em vez de dado inconsistente no banco.
-- Regras de frete testáveis isoladamente, sem subir o Spring (`CalculoFreteTest`, `PedidoEstadoTest`).
+- Operação incoerente vira erro claro (409 com motivo) em vez de dado inconsistente no banco.
+- Valores em `BigDecimal` com arredondamento explícito: sem erro de centavos de `double`.
+- Regras de pagamento e estados testados sem subir o Spring (`RegraPagamentoTest`, `EstadoLancamentoTest`).
 - O motivo dos erros aparece no corpo da resposta (`server.error.include-message=always`), inclusive os do Proxy de CEP.
 
 ## Dificuldades encontradas
 
 - O `CepProxy` não compilava: a regex `"\d{8}"` é um escape inválido em Java. Trocada por `"[0-9]{8}"`.
+- "Vencido" não é um estado do State: depende da data de hoje. Gravar isso exigiria um job atualizando o banco; ficou calculado (`isVencido()`).
+- Onde aplicar a Strategy: a regra fica gravada no lançamento, mas o cálculo só acontece na baixa, porque depende da data real do pagamento.
 - Testar sem internet: o teste HTTP substitui só o bean `provedorCep` (Adapter) por um mock, mantendo o Proxy real.
-- Decidir onde mudar o status: ficou restrito ao pacote `pedido` (`mudarPara` não é público) para que só os estados façam a transição.
-- Preço do produto pode mudar depois da venda: o pedido guarda uma cópia do nome e do preço.
 
 ## Respostas da atividade do Singleton
 
